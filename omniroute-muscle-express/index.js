@@ -1,23 +1,22 @@
-const express = require("express");
-const os = require("os-utils");
-const app = express();
+import express from "express";
+import osUtils from "os-utils";
+import os from "os";
 
+const app = express();
 const PORT = 4001;
 
-// The Telemetry Endpoint: Java Brain calls this to check "Load"
 app.get("/health", (req, res) => {
-  os.cpuUsage((v) => {
+  osUtils.cpuUsage((v) => {
     res.json({
       id: `worker-${PORT}`,
       status: "UP",
       cpu: (v * 100).toFixed(2),
-      mem: os.freeCommandMem().toFixed(2),
+      mem: (os.freemem() / 1024 / 1024).toFixed(2),
       port: PORT,
     });
   });
 });
 
-// The Execution Endpoint: Where tasks are sent
 app.post("/execute", express.json(), (req, res) => {
   console.log(`[Worker ${PORT}] Received task: ${req.body.taskName}`);
   setTimeout(() => {
