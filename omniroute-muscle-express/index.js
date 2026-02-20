@@ -3,7 +3,7 @@ import osUtils from "os-utils";
 import os from "os";
 
 const app = express();
-const PORT = 4001;
+const PORT = process.env.PORT || 4001;
 
 app.get("/health", (req, res) => {
   osUtils.cpuUsage((v) => {
@@ -18,10 +18,17 @@ app.get("/health", (req, res) => {
 });
 
 app.post("/execute", express.json(), (req, res) => {
-  console.log(`[Worker ${PORT}] Received task: ${req.body.taskName}`);
+  const delay = Math.floor(Math.random() * 400) + 100;
+
+  console.log(`[Worker ${PORT}] Processing ${req.body.taskName}...`);
+
   setTimeout(() => {
-    res.json({ success: true, processedBy: PORT });
-  }, 100);
+    res.json({
+      success: true,
+      processedBy: PORT,
+      timeTaken: `${delay}ms`,
+    });
+  }, delay);
 });
 
 app.listen(PORT, () => console.log(`🚀 Muscle Active on Port ${PORT}`));
