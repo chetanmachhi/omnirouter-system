@@ -1,51 +1,41 @@
 import express from "express";
 import osUtils from "os-utils";
-import os from "os";
+import { register, unregister } from "./controller/registry.js";
+import { requestTracker, getActiveCount } from "./middleware/monitor.js";
+import { handleTask } from "./controller/taskController.js";
 
 const app = express();
 const PORT = parseInt(process.argv[2]) || 4001;
+const BRAIN_URL = process.env.BRAIN_URL || "http://localhost:8080";
 
-// The "Variance Seed" - how far away from the base port is this worker?
-const OFFSET = PORT - 4001;
-
-// 1. CPU Variance: Port 4001 = 1x, 4002 = 1.5x, 4003 = 2x, etc.
-const CPU_MULTIPLIER = 1 + OFFSET * 0.5;
-
-// 2. Latency Variance: Port 4001 = 0ms, 4002 = 200ms, 4003 = 400ms, etc.
-const NETWORK_DELAY = OFFSET * 200;
+app.set("port", PORT);
+app.use(express.json());
+app.use(requestTracker);
 
 app.get("/health", (req, res) => {
   osUtils.cpuUsage((v) => {
-    const simulatedCpu = v * 100 * CPU_MULTIPLIER;
+    const activeTasks = getActiveCount();
+    const simulatedCpu = v * 100 + activeTasks * 15;
+    const currentDelay = activeTasks * 200;
 
     res.json({
-      id: `worker-${PORT}`,
-      status: "UP",
-      cpu: simulatedCpu.toFixed(2),
-      mem: (os.freemem() / 1024 / 1024).toFixed(2),
       port: PORT,
-      multiplier: CPU_MULTIPLIER,
-      baseDelay: NETWORK_DELAY,
+      cpu: simulatedCpu.toFixed(2),
+      activeTasks,
+      baseDelay: currentDelay,
+      status: "UP",
     });
   });
 });
 
-app.post("/execute", express.json(), (req, res) => {
-  console.log(
-    `[Worker ${PORT}] 🚀 Task Received. Processing with ${NETWORK_DELAY}ms lag...`,
-  );
+app.post("/execute", handleTask);
 
-  setTimeout(() => {
-    res.json({
-      success: true,
-      processedBy: PORT,
-      simulatedLag: `${NETWORK_DELAY}ms`,
-    });
-  }, NETWORK_DELAY + 100); // base delay + 100ms processing time
+app.listen(PORT, async () => {
+  console.log(`🚀 Worker ${PORT} Active. Load accumulation: 10s/task.`);
+  await register(BRAIN_URL, PORT);
 });
 
-app.listen(PORT, () => {
-  console.log(
-    `🚀 Worker ${PORT} Active | Multiplier: ${CPU_MULTIPLIER}x | Delay: ${NETWORK_DELAY}ms`,
-  );
+process.on("SIGINT", async () => {
+  await unregister(BRAIN_URL, PORT);
+  process.exit();
 });

@@ -1,6 +1,8 @@
 package com.omnirouter.brain.service;
+
 import java.time.Duration;
-import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,32 +22,50 @@ public class HealthMonitorService {
 
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper mapper = new ObjectMapper();
-    private final List<Integer> workerPorts = List.of(4001, 4002, 4003);
 
-    @Scheduled(fixedRate = 5000)
+    // 1. Frequency increased to 1 second for high-res monitoring
+    @Scheduled(fixedRate = 1000)
     public void monitor() {
-        // .parallelStream() handles the multi-threading for you
-        workerPorts.parallelStream().forEach(port -> {
-            try {
-                String statsJson = restClient.get()
-                        .uri("http://localhost:" + port + "/health")
-                        .retrieve()
-                        .body(String.class);
+        // 2. Dynamic Fetch: Get currently registered ports from Redis
+        Set<String> activePorts = redisTemplate.opsForSet().members("active_workers");
 
-                if (statsJson != null) {
-                    redisTemplate.opsForValue().set("worker:" + port + ":stats", statsJson, Duration.ofSeconds(10));
+        if (activePorts == null || activePorts.isEmpty()) {
+            return;
+        }
 
-                    JsonNode json = mapper.readTree(statsJson);
-                    String cpu = json.get("cpu").asText();
-                    String mem = json.get("mem").asText();
-                    String delay = json.has("baseDelay") ? json.get("baseDelay").asText() : "0";
+        for (String portStr : activePorts) {
+            int port = Integer.parseInt(portStr);
 
-                    System.out.printf("💓 Worker %d | CPU: %s%% | RAM Free: %sMB | Delay: %sms%n",
-                            port, cpu, mem, delay);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    String statsJson = restClient.get()
+                            .uri("http://localhost:" + port + "/health")
+                            .retrieve()
+                            .body(String.class);
+
+                    if (statsJson != null) {
+                        String historyKey = "worker:" + port + ":history";
+                        String scoreKey = "worker:" + port + ":score";
+
+                        redisTemplate.opsForList().leftPush(historyKey, statsJson);
+                        redisTemplate.opsForList().trim(historyKey, 0, 4);
+                        redisTemplate.expire(historyKey, Duration.ofSeconds(10));
+
+                        String currentScore = redisTemplate.opsForValue().get(scoreKey);
+                        if (currentScore == null) {
+                            currentScore = "100.0";
+                        }
+                        JsonNode json = mapper.readTree(statsJson);
+                        String cpu = json.get("cpu").asText();
+                        String delay = json.has("baseDelay") ? json.get("baseDelay").asText() : "0";
+
+                        System.out.printf("[HEALTH] Worker %d | CPU: %s%% | Delay: %sms | Score: %.2f | History: %d/5%n",
+                                port, cpu, delay, Double.parseDouble(currentScore), redisTemplate.opsForList().size(historyKey));
+                    }
+                } catch (JacksonException e) {
+                    System.err.println("[OFFLINE] Alert: Worker " + port + " is not responding!");
                 }
-            } catch (JacksonException e) {
-                System.err.println("⚠️ Alert: Worker " + port + " is Offline!");
-            }
-        });
+            });
+        }
     }
 }
