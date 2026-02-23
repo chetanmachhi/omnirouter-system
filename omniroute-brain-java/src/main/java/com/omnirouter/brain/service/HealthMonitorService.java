@@ -1,5 +1,4 @@
 package com.omnirouter.brain.service;
-
 import java.time.Duration;
 import java.util.List;
 
@@ -9,6 +8,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 @Service
 public class HealthMonitorService {
 
@@ -16,6 +19,7 @@ public class HealthMonitorService {
     private StringRedisTemplate redisTemplate;
 
     private final RestClient restClient = RestClient.create();
+    private final ObjectMapper mapper = new ObjectMapper();
     private final List<Integer> workerPorts = List.of(4001, 4002, 4003);
 
     @Scheduled(fixedRate = 5000)
@@ -23,14 +27,23 @@ public class HealthMonitorService {
         // .parallelStream() handles the multi-threading for you
         workerPorts.parallelStream().forEach(port -> {
             try {
-                String stats = restClient.get()
+                String statsJson = restClient.get()
                         .uri("http://localhost:" + port + "/health")
                         .retrieve()
                         .body(String.class);
 
-                redisTemplate.opsForValue().set("worker:" + port + ":stats", stats, Duration.ofSeconds(10));
-                System.out.println("💓 Simultaneous Heartbeat: Worker " + port + " is Healthy");
-            } catch (Exception e) {
+                if (statsJson != null) {
+                    redisTemplate.opsForValue().set("worker:" + port + ":stats", statsJson, Duration.ofSeconds(10));
+
+                    JsonNode json = mapper.readTree(statsJson);
+                    String cpu = json.get("cpu").asText();
+                    String mem = json.get("mem").asText();
+                    String delay = json.has("baseDelay") ? json.get("baseDelay").asText() : "0";
+
+                    System.out.printf("💓 Worker %d | CPU: %s%% | RAM Free: %sMB | Delay: %sms%n",
+                            port, cpu, mem, delay);
+                }
+            } catch (JacksonException e) {
                 System.err.println("⚠️ Alert: Worker " + port + " is Offline!");
             }
         });
