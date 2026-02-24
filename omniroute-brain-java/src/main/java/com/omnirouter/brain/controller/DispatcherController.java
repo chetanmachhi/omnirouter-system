@@ -1,9 +1,11 @@
 package com.omnirouter.brain.controller;
 
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,33 +26,38 @@ public class DispatcherController {
     private final RestClient restClient = RestClient.create();
 
     @PostMapping("/execute")
-    public String dispatchTask(@RequestBody String body) {
-        int maxRetries = 3;
+    public Map<String, Object> dispatchTask(@RequestBody String body) {
+        Map<String, Object> result = new HashMap<>();
 
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            String bestPort = findBestWorker();
+        // 1. Instantly pick the best worker
+        String bestPort = findBestWorker();
+        Map<String, String> snapshot = getActiveWorkers();
 
-            if (bestPort == null) {
-                return "Error: No active workers found in the cluster.";
-            }
+        if (bestPort == null) {
+            result.put("error", "No active workers");
+            return result;
+        }
 
+        // 2. Fire the request in a background thread (Don't wait!)
+        CompletableFuture.runAsync(() -> {
             try {
-                System.out.println("[DISPATCH] 🧠 Attempt " + attempt + ": Routing to Port " + bestPort);
-
-                return restClient.post()
+                restClient.post()
                         .uri("http://localhost:" + bestPort + "/execute")
                         .body(body)
                         .retrieve()
-                        .body(String.class);
-
+                        .toBodilessEntity();
             } catch (Exception e) {
-                System.err.println("[DISPATCH] ❌ Port " + bestPort + " failed. Applying penalty and retrying...");
-
                 redisTemplate.opsForValue().set("worker:" + bestPort + ":score", "999.0");
             }
-        }
+        });
 
-        return "Error: All candidate workers failed after " + maxRetries + " attempts.";
+        // 3. Return the "Server Selection" data immediately
+        result.put("port", bestPort);
+        result.put("timestamp", new Date().getTime());
+        result.put("snapshot", snapshot);
+        result.put("status", "Task Dispatched");
+
+        return result;
     }
 
     private String findBestWorker() {

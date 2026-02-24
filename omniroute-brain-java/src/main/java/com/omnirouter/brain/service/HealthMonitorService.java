@@ -23,10 +23,8 @@ public class HealthMonitorService {
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // 1. Frequency increased to 1 second for high-res monitoring
     @Scheduled(fixedRate = 1000)
     public void monitor() {
-        // 2. Dynamic Fetch: Get currently registered ports from Redis
         Set<String> activePorts = redisTemplate.opsForSet().members("active_workers");
 
         if (activePorts == null || activePorts.isEmpty()) {
@@ -52,15 +50,14 @@ public class HealthMonitorService {
                         redisTemplate.expire(historyKey, Duration.ofSeconds(10));
 
                         String currentScore = redisTemplate.opsForValue().get(scoreKey);
-                        if (currentScore == null) {
-                            currentScore = "100.0";
-                        }
                         JsonNode json = mapper.readTree(statsJson);
                         String cpu = json.get("cpu").asText();
-                        String delay = json.has("baseDelay") ? json.get("baseDelay").asText() : "0";
+                        String delay = json.has("networkDelay") ? json.get("networkDelay").asText()
+                                : json.has("baseDelay") ? json.get("baseDelay").asText() : "0";
 
-                        System.out.printf("[HEALTH] Worker %d | CPU: %s%% | Delay: %sms | Score: %.2f | History: %d/5%n",
-                                port, cpu, delay, Double.parseDouble(currentScore), redisTemplate.opsForList().size(historyKey));
+                        System.out.printf("[HEALTH] Worker %d | CPU: %s%% | Delay: %sms | Score: %s | History: %d/5%n",
+                                port, cpu, delay, currentScore != null ? currentScore : "N/A",
+                                redisTemplate.opsForList().size(historyKey));
                     }
                 } catch (JacksonException e) {
                     System.err.println("[OFFLINE] Alert: Worker " + port + " is not responding!");

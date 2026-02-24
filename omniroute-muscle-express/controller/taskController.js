@@ -1,24 +1,20 @@
 import axios from "axios";
 
-export const handleTask = (req, res) => {
-  const taskID = Math.floor(Math.random() * 9000) + 1000;
-  const port = req.app.get("port") || process.argv[2];
+export const handleTask = async (req, res, networkDelay) => {
+  const port = process.argv[2];
+  const taskID = Math.floor(Math.random() * 10000);
 
   const MANAGER_BASE = process.env.MANAGER_URL || "http://localhost:4000";
+  await axios.post(`${MANAGER_BASE}/activity/${port}`).catch(() => { });
 
-  axios.post(`${MANAGER_BASE}/activity/${port}`).catch(() => {
-    console.error(`[Worker ${port}] ⚠️ Manager notification failed at ${MANAGER_BASE}`);
-  });
-
-  console.log(`[Worker ${port}] 📥 Task #${taskID} started.`);
+  const totalTime = networkDelay + 20000;
 
   setTimeout(() => {
-    console.log(`[Worker ${port}] ✅ Task #${taskID} finished.`);
     res.json({
       success: true,
-      taskID,
-      port,
-      message: "Task completed after 10s",
+      processedBy: port,
+      simulatedLag: `${networkDelay}ms`,
+      workTime: "20000ms"
     });
-  }, 10000);
+  }, totalTime);
 };

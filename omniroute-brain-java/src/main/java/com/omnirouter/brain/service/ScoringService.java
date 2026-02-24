@@ -33,14 +33,11 @@ public class ScoringService {
             String historyKey = "worker:" + port + ":history";
             String bornKey = "worker:" + port + ":born";
 
-            Boolean hasHistory = redisTemplate.hasKey(historyKey);
-
-            if (Boolean.FALSE.equals(hasHistory)) {
+            if (Boolean.FALSE.equals(redisTemplate.hasKey(historyKey))) {
                 String bornAtStr = redisTemplate.opsForValue().get(bornKey);
                 long age = (bornAtStr != null) ? (now - Long.parseLong(bornAtStr)) : 99999;
 
                 if (age > 10000) {
-                    System.out.println("[REAPER] Worker " + port + " pulse lost. Removing.");
                     redisTemplate.opsForSet().remove("active_workers", port);
                     redisTemplate.delete(bornKey);
                     redisTemplate.delete("worker:" + port + ":score");
@@ -51,19 +48,27 @@ public class ScoringService {
             }
 
             List<String> history = redisTemplate.opsForList().range(historyKey, 0, -1);
-            double score = calculatePenalty(history);
+            double score = calculateWeightedScore(history);
             redisTemplate.opsForValue().set("worker:" + port + ":score", String.valueOf(score));
         }
     }
 
-    private double calculatePenalty(List<String> history) {
+    private double calculateWeightedScore(List<String> history) {
         if (history == null || history.isEmpty()) {
             return 100.0;
         }
 
         try {
             double totalCpu = 0;
+            double networkDelay = 0;
             int count = history.size();
+
+            JsonNode latestNode = mapper.readTree(history.get(0));
+            if (latestNode.has("networkDelay")) {
+                networkDelay = latestNode.get("networkDelay").asDouble();
+            } else if (latestNode.has("baseDelay")) {
+                networkDelay = latestNode.get("baseDelay").asDouble();
+            }
 
             for (String jsonStr : history) {
                 JsonNode node = mapper.readTree(jsonStr);
@@ -71,10 +76,10 @@ public class ScoringService {
             }
 
             double avgCpu = totalCpu / count;
+            double availabilityPenalty = (5 - count) * 10.0;
+            double delayPenalty = networkDelay / 10.0;
 
-            double availabilityPenalty = (5 - count) * 20.0;
-
-            return Math.min(100.0, availabilityPenalty + (avgCpu * 0.9));
+            return avgCpu + delayPenalty + availabilityPenalty;
         } catch (JacksonException e) {
             return 100.0;
         }
