@@ -12,7 +12,7 @@ const BRAIN_URL = process.env.BRAIN_URL || "http://localhost:8080";
 
 const OFFSET = Math.max(0, PORT - 4001);
 const CPU_MULTIPLIER = 1 + OFFSET * 0.25;
-const NETWORK_DELAY = OFFSET * 50;
+const NETWORK_DELAY = OFFSET * 20;
 
 const activeMuscles = new Map();
 const MAX_WORKERS = 5;
@@ -39,7 +39,7 @@ if (PORT === 4000) {
   app.post("/spawn/:targetPort", async (req, res) => {
     const targetPort = req.params.targetPort;
     if (activeMuscles.size >= MAX_WORKERS) {
-      return res.status(400).json({ error: "Because of limited resources cannot add test server" });
+      return res.status(400).json({ error: "Max test server limit reached" });
     }
     if (activeMuscles.has(targetPort)) {
       return res.status(400).json({ error: "Server already running" });
@@ -121,7 +121,7 @@ if (PORT === 4000) {
   app.get("/health", (req, res) => {
     osUtils.cpuUsage((v) => {
       const activeTasks = getActiveCount();
-      const simulatedCpu = (v * 100 * CPU_MULTIPLIER) + (activeTasks * 20);
+      const simulatedCpu = (v * 100 * CPU_MULTIPLIER) + (activeTasks * 30);
       res.json({
         port: PORT,
         cpu: simulatedCpu.toFixed(2),

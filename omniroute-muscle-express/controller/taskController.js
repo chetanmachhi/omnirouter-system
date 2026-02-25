@@ -7,14 +7,14 @@ export const handleTask = async (req, res, networkDelay) => {
   const MANAGER_BASE = process.env.MANAGER_URL || "http://localhost:4000";
   await axios.post(`${MANAGER_BASE}/activity/${port}`).catch(() => { });
 
-  const totalTime = networkDelay + 20000;
+  const totalTime = networkDelay + 30000;
 
   setTimeout(() => {
     res.json({
       success: true,
       processedBy: port,
       simulatedLag: `${networkDelay}ms`,
-      workTime: "20000ms"
+      workTime: "30000ms"
     });
   }, totalTime);
 };
